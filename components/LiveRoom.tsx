@@ -48,7 +48,7 @@ type ActiveStreamResponse = {
 
 export function LiveRoom() {
   const [email, setEmail] = useState("user1@test.com");
-  const [password, setPassword] = useState("password123");
+  const [password, setPassword] = useState("");
 
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -473,12 +473,6 @@ export function LiveRoom() {
             className="flex min-h-[240px] items-center justify-center rounded-lg border"
           />
         </div>
-      </div>
-
-      <div className="rounded-lg border p-4 text-sm text-gray-600">
-        <p>Test users:</p>
-        <p>user1@test.com / password123</p>
-        <p>user2@test.com / password456</p>
       </div>
     </div>
   );
