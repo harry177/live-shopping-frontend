@@ -62,6 +62,22 @@ export function LiveRoom() {
 
   const roomRef = useRef<Room | null>(null);
 
+  const isCurrentUserStreamer =
+    !!user && !!activeStream && activeStream.streamer_user_id === user.id;
+
+  const isWatching = mode === "viewer" && isConnected;
+
+  const canStartStream =
+    !isBusy && !!accessToken && !activeStream && !isConnected;
+
+  const canWatchStream =
+    !isBusy && !!activeStream && !isCurrentUserStreamer && !isWatching;
+
+  const canStopStream =
+    !isBusy && !!activeStream && isCurrentUserStreamer;
+
+  const canLeaveStream = !isBusy && isWatching;
+
   async function login() {
     try {
       setIsBusy(true);
@@ -78,18 +94,20 @@ export function LiveRoom() {
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to login");
+        throw new Error(data?.error || "Failed to login");
       }
 
-      const data: LoginResponse = await response.json();
+      const result: LoginResponse = data;
 
-      setAccessToken(data.accessToken);
-      setUser(data.user);
-      setStatus(`logged in as ${data.user.displayName}`);
+      setAccessToken(result.accessToken);
+      setUser(result.user);
+      setStatus(`logged in as ${result.user.displayName}`);
     } catch (error) {
       console.error(error);
-      setStatus("login error");
+      setStatus(error instanceof Error ? error.message : "login error");
     } finally {
       setIsBusy(false);
     }
@@ -134,15 +152,21 @@ export function LiveRoom() {
 
     room.on(RoomEvent.Connected, () => {
       setIsConnected(true);
+      setMode(params.mode);
       setStatus(`connected as ${params.mode}`);
-      console.log("room connected");
     });
 
     room.on(RoomEvent.Disconnected, (reason) => {
       console.log("room disconnected", reason);
+
       setIsConnected(false);
-      setStatus("disconnected");
       setMode("idle");
+
+      if (params.mode === "streamer") {
+        setStatus("stream disconnected");
+      } else {
+        setStatus("viewer disconnected");
+      }
     });
 
     room.on(RoomEvent.ConnectionStateChanged, (state) => {
@@ -155,18 +179,24 @@ export function LiveRoom() {
     });
 
     room.on(RoomEvent.TrackSubscribed, (track) => {
-      if (track.kind === "video" || track.kind === "audio") {
-        const element = track.attach();
-        element.setAttribute("data-remote-track", "true");
-
-        if (track.kind === "video" && element instanceof HTMLVideoElement) {
-          element.autoplay = true;
-          element.playsInline = true;
-          element.className = "max-h-[240px] w-full rounded-md";
-        }
-
-        document.getElementById("remote-media")?.appendChild(element);
+      if (track.kind !== "video" && track.kind !== "audio") {
+        return;
       }
+
+      const element = track.attach();
+      element.setAttribute("data-remote-track", "true");
+
+      if (track.kind === "video" && element instanceof HTMLVideoElement) {
+        element.autoplay = true;
+        element.playsInline = true;
+        element.className = "max-h-[240px] w-full rounded-md";
+      }
+
+      document.getElementById("remote-media")?.appendChild(element);
+    });
+
+    room.on(RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach().forEach((element) => element.remove());
     });
 
     await room.connect(params.wsUrl, params.token);
@@ -188,12 +218,13 @@ export function LiveRoom() {
       }
 
       const localContainer = document.getElementById("local-media");
+
       if (localContainer) {
         localContainer.innerHTML = "";
         localContainer.appendChild(localVideoEl);
       }
 
-      setStatus("local tracks published");
+      setStatus("stream started");
     }
 
     roomRef.current = room;
@@ -213,7 +244,6 @@ export function LiveRoom() {
       const response = await fetch(`${API_BASE_URL}/api/v1/streams/start`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
       });
@@ -225,6 +255,7 @@ export function LiveRoom() {
       }
 
       const result: StreamAccessResponse = data;
+
       setActiveStream(result.stream);
 
       await setupRoom({
@@ -233,8 +264,6 @@ export function LiveRoom() {
         publishLocalTracks: true,
         mode: "streamer",
       });
-
-      setStatus("stream started");
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : "start stream error");
@@ -249,6 +278,11 @@ export function LiveRoom() {
       return;
     }
 
+    if (isCurrentUserStreamer) {
+      setStatus("you are already streaming");
+      return;
+    }
+
     try {
       setIsBusy(true);
       setStatus("joining as viewer");
@@ -257,7 +291,7 @@ export function LiveRoom() {
         `${API_BASE_URL}/api/v1/streams/${activeStream.id}/view-token`,
         {
           method: "POST",
-        },
+        }
       );
 
       const data = await response.json();
@@ -285,7 +319,7 @@ export function LiveRoom() {
   }
 
   async function handleStopStream() {
-    if (!accessToken || !activeStream) {
+    if (!accessToken || !activeStream || !isCurrentUserStreamer) {
       return;
     }
 
@@ -300,7 +334,7 @@ export function LiveRoom() {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        },
+        }
       );
 
       const data = await response.json();
@@ -310,6 +344,7 @@ export function LiveRoom() {
       }
 
       await cleanupRoom();
+
       setActiveStream(null);
       setStatus("stream stopped");
     } catch (error) {
@@ -320,38 +355,64 @@ export function LiveRoom() {
     }
   }
 
-  async function handleDisconnect() {
+  async function handleLeaveStream() {
+    if (mode !== "viewer") {
+      return;
+    }
+
     await cleanupRoom();
-    setStatus("disconnected");
+    setStatus("left stream");
   }
 
   useEffect(() => {
-    let isMounted = true;
+  let isMounted = true;
 
-    const load = async () => {
-      try {
-        const stream = await fetchActiveStream();
+  const load = async () => {
+    try {
+      const stream = await fetchActiveStream();
 
-        if (isMounted) {
-          setActiveStream(stream);
-        }
-      } catch (error) {
-        console.error(error);
+      if (!isMounted) {
+        return;
       }
-    };
 
+      setActiveStream(stream);
+
+      if (!stream && roomRef.current) {
+        roomRef.current.disconnect();
+        roomRef.current = null;
+
+        setIsConnected(false);
+        setMode("idle");
+
+        const localContainer = document.getElementById("local-media");
+        const remoteContainer = document.getElementById("remote-media");
+
+        if (localContainer) localContainer.innerHTML = "";
+        if (remoteContainer) remoteContainer.innerHTML = "";
+
+        setStatus("stream ended");
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  void load();
+
+  const interval = setInterval(() => {
     void load();
+  }, 3000);
 
-    const interval = setInterval(() => {
-      void load();
-    }, 3000);
+  return () => {
+    isMounted = false;
+    clearInterval(interval);
 
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-      void cleanupRoom();
-    };
-  }, []);
+    if (roomRef.current) {
+      roomRef.current.disconnect();
+      roomRef.current = null;
+    }
+  };
+}, []);
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
@@ -414,42 +475,41 @@ export function LiveRoom() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button
-            onClick={handleStartStream}
-            disabled={isBusy || !accessToken || !!activeStream}
-            className="rounded-md border px-4 py-2 disabled:opacity-50"
-          >
-            Start stream
-          </button>
+          {canStartStream && (
+            <button
+              onClick={handleStartStream}
+              className="rounded-md border px-4 py-2"
+            >
+              Start stream
+            </button>
+          )}
 
-          <button
-            onClick={handleWatchLive}
-            disabled={isBusy || !activeStream}
-            className="rounded-md border px-4 py-2 disabled:opacity-50"
-          >
-            Watch live
-          </button>
+          {canWatchStream && (
+            <button
+              onClick={handleWatchLive}
+              className="rounded-md border px-4 py-2"
+            >
+              Watch stream
+            </button>
+          )}
 
-          <button
-            onClick={handleStopStream}
-            disabled={
-              isBusy ||
-              !activeStream ||
-              !user ||
-              activeStream.streamer_user_id !== user.id
-            }
-            className="rounded-md border px-4 py-2 disabled:opacity-50"
-          >
-            Stop stream
-          </button>
+          {canStopStream && (
+            <button
+              onClick={handleStopStream}
+              className="rounded-md border px-4 py-2"
+            >
+              Stop stream
+            </button>
+          )}
 
-          <button
-            onClick={handleDisconnect}
-            disabled={isBusy || !isConnected}
-            className="rounded-md border px-4 py-2 disabled:opacity-50"
-          >
-            Disconnect
-          </button>
+          {canLeaveStream && (
+            <button
+              onClick={handleLeaveStream}
+              className="rounded-md border px-4 py-2"
+            >
+              Leave stream
+            </button>
+          )}
         </div>
       </div>
 
