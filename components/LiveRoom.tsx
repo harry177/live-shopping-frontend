@@ -482,8 +482,11 @@ export function LiveRoom() {
       {selectedRecordingUrl && (
         <div className="rounded-lg border p-4">
           <video
+            key={selectedRecordingUrl}
             src={selectedRecordingUrl}
             controls
+            preload="metadata"
+            playsInline
             className="w-full rounded-md"
           />
         </div>
