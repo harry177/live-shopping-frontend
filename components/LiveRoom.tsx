@@ -46,6 +46,15 @@ type ActiveStreamResponse = {
   stream: Stream | null;
 };
 
+type Recording = {
+  id: string;
+  stream_id: string;
+  egress_id: string;
+  status: "recording" | "completed" | "failed";
+  playback_url: string;
+  created_at: string;
+};
+
 export function LiveRoom() {
   const [email, setEmail] = useState("user1@test.com");
   const [password, setPassword] = useState("");
@@ -60,6 +69,12 @@ export function LiveRoom() {
   const [isConnected, setIsConnected] = useState(false);
   const [mode, setMode] = useState<"idle" | "streamer" | "viewer">("idle");
 
+  const [shouldRecord, setShouldRecord] = useState(false);
+  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [selectedRecordingUrl, setSelectedRecordingUrl] = useState<
+    string | null
+  >(null);
+
   const roomRef = useRef<Room | null>(null);
 
   const isCurrentUserStreamer =
@@ -73,8 +88,7 @@ export function LiveRoom() {
   const canWatchStream =
     !isBusy && !!activeStream && !isCurrentUserStreamer && !isWatching;
 
-  const canStopStream =
-    !isBusy && !!activeStream && isCurrentUserStreamer;
+  const canStopStream = !isBusy && !!activeStream && isCurrentUserStreamer;
 
   const canLeaveStream = !isBusy && isWatching;
 
@@ -264,6 +278,18 @@ export function LiveRoom() {
         publishLocalTracks: true,
         mode: "streamer",
       });
+
+      if (shouldRecord) {
+        await fetch(
+          `${API_BASE_URL}/api/v1/streams/${result.stream.id}/recordings/start`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+        );
+      }
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : "start stream error");
@@ -291,7 +317,7 @@ export function LiveRoom() {
         `${API_BASE_URL}/api/v1/streams/${activeStream.id}/view-token`,
         {
           method: "POST",
-        }
+        },
       );
 
       const data = await response.json();
@@ -334,7 +360,7 @@ export function LiveRoom() {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        }
+        },
       );
 
       const data = await response.json();
@@ -347,6 +373,7 @@ export function LiveRoom() {
 
       setActiveStream(null);
       setStatus("stream stopped");
+      await fetchRecordings();
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : "stop stream error");
@@ -364,59 +391,103 @@ export function LiveRoom() {
     setStatus("left stream");
   }
 
+  async function fetchRecordings() {
+    const response = await fetch(`${API_BASE_URL}/api/v1/streams/recordings`);
+    const data = await response.json();
+
+    if (response.ok) {
+      setRecordings(data.recordings);
+    }
+  }
+
   useEffect(() => {
-  let isMounted = true;
+    let isMounted = true;
 
-  const load = async () => {
-    try {
-      const stream = await fetchActiveStream();
+    const load = async () => {
+      try {
+        const stream = await fetchActiveStream();
 
-      if (!isMounted) {
-        return;
+        if (!isMounted) {
+          return;
+        }
+
+        await fetchRecordings();
+
+        setActiveStream(stream);
+
+        if (!stream && roomRef.current) {
+          roomRef.current.disconnect();
+          roomRef.current = null;
+
+          setIsConnected(false);
+          setMode("idle");
+
+          const localContainer = document.getElementById("local-media");
+          const remoteContainer = document.getElementById("remote-media");
+
+          if (localContainer) localContainer.innerHTML = "";
+          if (remoteContainer) remoteContainer.innerHTML = "";
+
+          setStatus("stream ended");
+        }
+      } catch (error) {
+        console.error(error);
       }
+    };
 
-      setActiveStream(stream);
+    void load();
 
-      if (!stream && roomRef.current) {
+    const interval = setInterval(() => {
+      void load();
+    }, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+
+      if (roomRef.current) {
         roomRef.current.disconnect();
         roomRef.current = null;
-
-        setIsConnected(false);
-        setMode("idle");
-
-        const localContainer = document.getElementById("local-media");
-        const remoteContainer = document.getElementById("remote-media");
-
-        if (localContainer) localContainer.innerHTML = "";
-        if (remoteContainer) remoteContainer.innerHTML = "";
-
-        setStatus("stream ended");
       }
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  void load();
-
-  const interval = setInterval(() => {
-    void load();
-  }, 3000);
-
-  return () => {
-    isMounted = false;
-    clearInterval(interval);
-
-    if (roomRef.current) {
-      roomRef.current.disconnect();
-      roomRef.current = null;
-    }
-  };
-}, []);
+    };
+  }, []);
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 p-6">
       <h1 className="text-2xl font-semibold">Live Shopping MVP</h1>
+
+      {recordings.length > 0 && (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-4 text-lg font-medium">Recordings</h2>
+
+          <div className="flex gap-3">
+            {recordings.map((recording) => (
+              <button
+                key={recording.id}
+                onClick={() => setSelectedRecordingUrl(recording.playback_url)}
+                className="h-20 w-20 overflow-hidden rounded-full border"
+              >
+                <video
+                  src={recording.playback_url}
+                  muted
+                  preload="metadata"
+                  className="h-full w-full object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selectedRecordingUrl && (
+        <div className="rounded-lg border p-4">
+          <video
+            src={selectedRecordingUrl}
+            controls
+            className="w-full rounded-md"
+          />
+        </div>
+      )}
 
       <div className="rounded-lg border p-4">
         <h2 className="mb-4 text-lg font-medium">Login as streamer</h2>
@@ -476,12 +547,22 @@ export function LiveRoom() {
 
         <div className="flex flex-wrap gap-3">
           {canStartStream && (
-            <button
-              onClick={handleStartStream}
-              className="rounded-md border px-4 py-2"
-            >
-              Start stream
-            </button>
+            <>
+              <button
+                onClick={handleStartStream}
+                className="rounded-md border px-4 py-2"
+              >
+                Start stream
+              </button>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={shouldRecord}
+                  onChange={(e) => setShouldRecord(e.target.checked)}
+                />
+                Record stream
+              </label>
+            </>
           )}
 
           {canWatchStream && (
