@@ -9,6 +9,7 @@ import {
 } from "livekit-client";
 
 import { API_BASE_URL } from "@/lib/api";
+import { HlsPlayer } from "./HlsPlayer";
 
 type AuthUser = {
   id: string;
@@ -55,6 +56,13 @@ type Recording = {
   created_at: string;
 };
 
+type HlsAccessResponse = {
+  stream: Stream;
+  hls: {
+    playbackUrl: string;
+  };
+};
+
 export function LiveRoom() {
   const [email, setEmail] = useState("user1@test.com");
   const [password, setPassword] = useState("");
@@ -63,6 +71,7 @@ export function LiveRoom() {
   const [user, setUser] = useState<AuthUser | null>(null);
 
   const [activeStream, setActiveStream] = useState<Stream | null>(null);
+  const [hlsPlaybackUrl, setHlsPlaybackUrl] = useState<string | null>(null);
 
   const [status, setStatus] = useState("idle");
   const [isBusy, setIsBusy] = useState(false);
@@ -152,6 +161,7 @@ export function LiveRoom() {
 
     if (localContainer) localContainer.innerHTML = "";
     if (remoteContainer) remoteContainer.innerHTML = "";
+    setHlsPlaybackUrl(null);
   }
 
   async function setupRoom(params: {
@@ -326,15 +336,11 @@ export function LiveRoom() {
         throw new Error(data?.error || "Failed to join stream");
       }
 
-      const result: StreamAccessResponse = data;
+      const result: HlsAccessResponse = data;
 
-      await setupRoom({
-        wsUrl: result.livekit.wsUrl,
-        token: result.livekit.token,
-        publishLocalTracks: false,
-        mode: "viewer",
-      });
-
+      setHlsPlaybackUrl(result.hls.playbackUrl);
+      setMode("viewer");
+      setIsConnected(true);
       setStatus("watching live stream");
     } catch (error) {
       console.error(error);
@@ -612,10 +618,15 @@ export function LiveRoom() {
 
         <div>
           <h2 className="mb-2 text-lg font-medium">Remote media</h2>
-          <div
-            id="remote-media"
-            className="flex min-h-[240px] items-center justify-center rounded-lg border"
-          />
+
+          {hlsPlaybackUrl && mode === "viewer" ? (
+            <HlsPlayer src={hlsPlaybackUrl} />
+          ) : (
+            <div
+              id="remote-media"
+              className="flex min-h-[240px] items-center justify-center rounded-lg border"
+            />
+          )}
         </div>
       </div>
     </div>
