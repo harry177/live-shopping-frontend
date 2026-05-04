@@ -289,6 +289,22 @@ export function LiveRoom() {
         mode: "streamer",
       });
 
+      const hlsResponse = await fetch(
+        `${API_BASE_URL}/api/v1/streams/${result.stream.id}/hls/start`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        },
+      );
+
+      const hlsData = await hlsResponse.json();
+
+      if (!hlsResponse.ok) {
+        throw new Error(hlsData?.error || "Failed to start HLS");
+      }
+
       if (shouldRecord) {
         await fetch(
           `${API_BASE_URL}/api/v1/streams/${result.stream.id}/recordings/start`,
