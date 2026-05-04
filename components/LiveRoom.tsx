@@ -261,6 +261,8 @@ export function LiveRoom() {
       return;
     }
 
+    const shouldStartRecording = shouldRecord;
+
     try {
       setIsBusy(true);
       setStatus("starting stream");
@@ -272,13 +274,11 @@ export function LiveRoom() {
         },
       });
 
-      const data = await response.json();
+      const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "Failed to start stream");
+        throw new Error(result?.error || "Failed to start stream");
       }
-
-      const result: StreamAccessResponse = data;
 
       setActiveStream(result.stream);
 
@@ -289,36 +289,29 @@ export function LiveRoom() {
         mode: "streamer",
       });
 
-      const hlsResponse = await fetch(
-        `${API_BASE_URL}/api/v1/streams/${result.stream.id}/hls/start`,
+      const outputsResponse = await fetch(
+        `${API_BASE_URL}/api/v1/streams/${result.stream.id}/outputs/start`,
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
           },
+          body: JSON.stringify({
+            shouldRecord: shouldStartRecording,
+          }),
         },
       );
 
-      const hlsData = await hlsResponse.json();
+      const outputsData = await outputsResponse.json();
 
-      if (!hlsResponse.ok) {
-        throw new Error(hlsData?.error || "Failed to start HLS");
+      if (!outputsResponse.ok) {
+        throw new Error(outputsData?.error || "Failed to start outputs");
       }
 
-      if (shouldRecord) {
-        await fetch(
-          `${API_BASE_URL}/api/v1/streams/${result.stream.id}/recordings/start`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
-          },
-        );
-      }
+      setStatus("stream is live");
     } catch (error) {
-      console.error(error);
-      setStatus(error instanceof Error ? error.message : "start stream error");
+      setStatus(error instanceof Error ? error.message : "error");
     } finally {
       setIsBusy(false);
     }
