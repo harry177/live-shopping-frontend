@@ -12,21 +12,12 @@ export function HlsPlayer({ src }: Props) {
 
   useEffect(() => {
     const video = videoRef.current;
-
     if (!video || !src) return;
 
     console.log("HLS src:", src);
 
-    video.muted = true;
-
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = src;
-      video.play().catch(console.error);
-      return;
-    }
-
     if (!Hls.isSupported()) {
-      console.error("HLS is not supported");
+      console.error("Hls.js is not supported");
       return;
     }
 
@@ -48,13 +39,11 @@ export function HlsPlayer({ src }: Props) {
       console.error("HLS error:", data);
     });
 
-    hls.loadSource(src);
     hls.attachMedia(video);
+    hls.loadSource(src);
 
     return () => {
       hls.destroy();
-      video.removeAttribute("src");
-      video.load();
     };
   }, [src]);
 
