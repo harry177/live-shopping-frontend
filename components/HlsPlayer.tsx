@@ -56,8 +56,8 @@ export function HlsPlayer({ src }: Props) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 5,
+        liveSyncDurationCount: 5,
+        liveMaxLatencyDurationCount: 8,
       });
 
       hlsRef.current = hls;
