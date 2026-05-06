@@ -29,18 +29,11 @@ type Stream = {
   streamer_display_name: string;
   room_name: string;
   status: "live" | "ended";
+  playback_status: "preparing" | "ready" | "failed";
   started_at: string | null;
   ended_at: string | null;
   deadline_at: string;
   created_at: string;
-};
-
-type StreamAccessResponse = {
-  stream: Stream;
-  livekit: {
-    token: string;
-    wsUrl: string;
-  };
 };
 
 type ActiveStreamResponse = {
@@ -94,8 +87,16 @@ export function LiveRoom() {
   const canStartStream =
     !isBusy && !!accessToken && !activeStream && !isConnected;
 
+  const isPlaybackReady = activeStream?.playback_status === "ready";
+  const isPlaybackPreparing = activeStream?.playback_status === "preparing";
+  const isPlaybackFailed = activeStream?.playback_status === "failed";
+
   const canWatchStream =
-    !isBusy && !!activeStream && !isCurrentUserStreamer && !isWatching;
+    !isBusy &&
+    !!activeStream &&
+    isPlaybackReady &&
+    !isCurrentUserStreamer &&
+    !isWatching;
 
   const canStopStream = !isBusy && !!activeStream && isCurrentUserStreamer;
 
@@ -320,6 +321,11 @@ export function LiveRoom() {
   async function handleWatchLive() {
     if (!activeStream) {
       setStatus("no active stream");
+      return;
+    }
+
+    if (activeStream.playback_status !== "ready") {
+      setStatus("stream playback is still preparing");
       return;
     }
 
@@ -555,9 +561,24 @@ export function LiveRoom() {
 
         <div className="mb-4 text-sm">
           {activeStream ? (
-            <span className="font-medium text-red-600">
-              ● {activeStream.streamer_display_name} is live
-            </span>
+            <div className="flex flex-col gap-1">
+              <span className="font-medium text-red-600">
+                ● {activeStream.streamer_display_name} is live
+              </span>
+
+              {!isCurrentUserStreamer && isPlaybackPreparing && (
+                <span className="text-gray-500">
+                  Stream is starting. Playback will be available soon...
+                </span>
+              )}
+
+              {!isCurrentUserStreamer && isPlaybackFailed && (
+                <span className="text-red-600">
+                  Stream playback is not available yet. Please wait or try again
+                  soon.
+                </span>
+              )}
+            </div>
           ) : (
             <span className="text-gray-500">No active stream</span>
           )}
